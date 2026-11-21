@@ -1,7 +1,7 @@
 # colloc_mlita2026
 Коллоквиум по мат.логике, 2026
 
-Верификатор программ
+[Верификатор программ](https://docs.google.com/document/d/13kJ4TiMGvOOYHXz_vu3ybFTZ5ju2YFo-BrKMZioy6Ns/edit?pli=1&tab=t.0)
 
 Кочкин Дмитрий - tbd
 
