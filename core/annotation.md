@@ -21,14 +21,12 @@
    BoolOp
    Not
    BoolConstant
-   Quantifier
    Assign
    If
    While
    Assert
    Assume
    Return
-   Skip
 
 3. Интерфейсы ролей:
 
@@ -84,25 +82,6 @@
    - while
 
 5. Передаёт Formula роли 4.
-
-Реализация: core/wp.py, тесты: tests/test_wp.py
-Соглашения (константы в classes.py):
-   - BoolOp.op: AND = "and", OR = "or", IMPLIES = "=>" (2 операнда)
-   - Quantifier.kind: FORALL = "forall", EXISTS = "exists"
-   - возвращаемое значение в ensures: Variable(RESULT), RESULT = "result"
-   - skip / pass: команда Skip()
-Интерфейс:
-   wp(command | list[Command], postcondition,
-      return_postcondition=None, on_loop=None) -> Formula
-   - return_postcondition: постусловие для return (обычно ensures), по умолчанию = postcondition
-   - для while возвращает инвариант; VC цикла строит роль 4
-   - on_loop(loop, post, return_post) вызывается на каждом цикле:
-     post — что должно выполняться после выхода из цикла (для VC I and not b => post)
-   substitute(formula, {name: expr}) -> Formula   — Q[e/x] без захвата переменных
-   free_vars(formula) -> set[str]
-Ограничения:
-   - присваивание только в Variable (не в Attribute)
-   - множественное присваивание (a, b = b, a % b) парсер раскладывает через временные переменные
 
 
 Роль 4 — Генератор условий корректности (VC)

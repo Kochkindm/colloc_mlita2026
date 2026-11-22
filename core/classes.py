@@ -2,18 +2,6 @@ from dataclasses import dataclass
 from typing import TypeAlias
 
 
-# Соглашения о строковых операторах (роль 3 — семантика и wp).
-# BoolOp.op
-AND = "and"          # n-арная конъюнкция
-OR = "or"            # n-арная дизъюнкция
-IMPLIES = "=>"       # импликация, ровно 2 операнда: [посылка, следствие]
-# Quantifier.kind
-FORALL = "forall"
-EXISTS = "exists"
-# Имя переменной, обозначающей возвращаемое значение функции в ensures.
-RESULT = "result"
-
-
 @dataclass(frozen=True)
 class Variable:
     name: str
@@ -75,14 +63,7 @@ class BoolConstant:
     value: bool
 
 
-@dataclass(frozen=True)
-class Quantifier:
-    kind: str                # FORALL | EXISTS
-    variables: list[str]     # связанные переменные
-    body: "Formula"
-
-
-Formula: TypeAlias = Comparison | BoolOp | Not | BoolConstant | Quantifier
+Formula: TypeAlias = Comparison | BoolOp | Not | BoolConstant
 
 
 @dataclass(frozen=True)
@@ -120,12 +101,7 @@ class Return:
     value: Expr
 
 
-@dataclass(frozen=True)
-class Skip:
-    pass
-
-
-Command: TypeAlias = Assign | If | While | Assert | Assume | Return | Skip
+Command: TypeAlias = Assign | If | While | Assert | Assume | Return
 
 
 @dataclass(frozen=True)
