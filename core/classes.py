@@ -62,8 +62,13 @@ class Not:
 class BoolConstant:
     value: bool
 
+@dataclass(frozen=True)
+class Quantifier:
+    kind: str
+    variables: list[str]
+    body: "Formula"
 
-Formula: TypeAlias = Comparison | BoolOp | Not | BoolConstant
+Formula: TypeAlias = Comparison | BoolOp | Not | BoolConstant | Quantifier
 
 
 @dataclass(frozen=True)
