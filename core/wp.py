@@ -55,6 +55,7 @@ from core.classes import (
     UnaryOp,
     Variable,
     While,
+    Quantifier,
 )
 
 AND = "and"          # n-арная конъюнкция
@@ -64,22 +65,6 @@ FORALL = "forall"
 EXISTS = "exists"
 RESULT = "result"    # возвращаемое значение функции в ensures
 
-
-@dataclass(frozen=True)
-class Quantifier:
-    """Квантор: kind variables. body, например forall d. d <= result.
-
-    kind      — FORALL или EXISTS;
-    variables — имена связанных переменных;
-    body      — формула под квантором.
-    """
-
-    kind: str
-    variables: list[str]
-    body: "Formula"
-
-
-Formula: TypeAlias = BaseFormula | Quantifier
 
 TRUE = BoolConstant(True)
 FALSE = BoolConstant(False)
