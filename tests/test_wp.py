@@ -1,11 +1,6 @@
 import pytest
 
 from core.classes import (
-    AND,
-    FORALL,
-    IMPLIES,
-    OR,
-    RESULT,
     Assert,
     Assign,
     Assume,
@@ -18,15 +13,19 @@ from core.classes import (
     Constant,
     If,
     Not,
-    Quantifier,
     Return,
-    Skip,
     Variable,
     While,
 )
 from core.wp import (
+    AND,
     FALSE,
+    FORALL,
+    IMPLIES,
+    OR,
+    RESULT,
     TRUE,
+    Quantifier,
     WPError,
     free_vars,
     mk_and,
@@ -89,11 +88,6 @@ result = v(RESULT)
 
 
 # --- skip / присваивание / последовательность ------------------------------
-
-def test_skip():
-    q = gt(x, c(0))
-    assert wp(Skip(), q) == q
-
 
 def test_empty_sequence_is_skip():
     q = gt(x, c(0))
@@ -202,7 +196,7 @@ def test_explicit_return_postcondition():
     normal = FALSE  # функция обязана завершиться через return
     ensures = eq(result, c(1))
     assert wp([Return(c(1))], normal, return_postcondition=ensures) == eq(c(1), c(1))
-    assert wp([Skip()], normal, return_postcondition=ensures) == FALSE
+    assert wp([], normal, return_postcondition=ensures) == FALSE
 
 
 # --- while ------------------------------------------------------------------

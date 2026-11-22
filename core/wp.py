@@ -1,3 +1,4 @@
+# pyright: reportArgumentType=false
 """Роль 3 — семантика и weakest precondition.
 
 Публичный интерфейс:
@@ -6,7 +7,7 @@
     free_vars(formula) -> set[str]
 
 Правила:
-    wp(skip, Q)              = Q
+    wp(skip, Q)              = Q              (skip / pass — пустой список [])
     wp(x := e, Q)            = Q[e/x]
     wp(c1; c2, Q)            = wp(c1, wp(c2, Q))
     wp(if b c1 else c2, Q)   = (b => wp(c1, Q)) and (not b => wp(c2, Q))
@@ -14,15 +15,27 @@
     wp(assume P, Q)          = P => Q
     wp(return e, Q)          = R[e/result]    (R — постусловие функции)
     wp(while b {I} c, Q)     = I              (VC цикла собирает роль 4)
+
+Общий контракт core/classes.py не меняется. Всё, чего в нём нет и что
+нужно семантике, объявлено здесь:
+    - строки операторов AND, OR, IMPLIES (BoolOp.op), FORALL, EXISTS;
+    - RESULT — имя переменной возвращаемого значения в ensures;
+    - Quantifier — квантор (нужен для постусловий вида "forall d. ...").
+      Может стоять везде, где ожидается Formula (внутри BoolOp, Not и т.д.).
+      Статический тип Formula из classes.py его не включает, поэтому проверка
+      reportArgumentType в этом файле отключена директивой pyright в начале.
+
+Ограничения:
+    - присваивание только в Variable (не в Attribute);
+    - множественное присваивание (a, b = b, a % b) парсер раскладывает
+      через временные переменные.
 """
 
 from collections.abc import Callable, Iterable, Mapping, Sequence
+from dataclasses import dataclass
+from typing import TypeAlias
 
 from core.classes import (
-    AND,
-    IMPLIES,
-    OR,
-    RESULT,
     Assert,
     Assign,
     Assume,
@@ -35,25 +48,42 @@ from core.classes import (
     Comparison,
     Constant,
     Expr,
-    Formula,
+    Formula as BaseFormula,
     If,
     Not,
-    Quantifier,
     Return,
-    Skip,
     UnaryOp,
     Variable,
     While,
 )
 
+AND = "and"          # n-арная конъюнкция
+OR = "or"            # n-арная дизъюнкция
+IMPLIES = "=>"       # импликация, ровно 2 операнда: [посылка, следствие]
+FORALL = "forall"
+EXISTS = "exists"
+RESULT = "result"    # возвращаемое значение функции в ensures
+
+
+@dataclass(frozen=True)
+class Quantifier:
+    """Квантор: kind variables. body, например forall d. d <= result.
+
+    kind      — FORALL или EXISTS;
+    variables — имена связанных переменных;
+    body      — формула под квантором.
+    """
+
+    kind: str
+    variables: list[str]
+    body: "Formula"
+
+
+Formula: TypeAlias = BaseFormula | Quantifier
+
 TRUE = BoolConstant(True)
 FALSE = BoolConstant(False)
 
-# Вызывается для каждого встреченного цикла:
-#   on_loop(loop, post, return_post)
-# post        — постусловие, которое должно выполняться после выхода из цикла;
-# return_post — постусловие для return внутри тела цикла.
-# Роль 4 по этим данным строит VC: I and not b => post, I and b => wp(body, I).
 LoopCallback = Callable[[While, Formula, Formula], None]
 
 
@@ -61,17 +91,19 @@ class WPError(Exception):
     """Команда или выражение не поддерживаются семантикой wp."""
 
 
-# ---------------------------------------------------------------------------
-# Конструкторы формул с упрощением булевых констант
-# ---------------------------------------------------------------------------
-
 def mk_not(f: Formula) -> Formula:
+    """Строит not f; для булевой константы сразу возвращает её отрицание."""
     if isinstance(f, BoolConstant):
         return BoolConstant(not f.value)
     return Not(f)
 
 
 def mk_and(*fs: Formula) -> Formula:
+    """Строит конъюнкцию fs с упрощением констант.
+
+    True выбрасывается, False поглощает всю конъюнкцию, вложенные "and"
+    сплющиваются. Пустая конъюнкция — True, из одного операнда — сам операнд.
+    """
     operands: list[Formula] = []
     for f in fs:
         if f == TRUE:
@@ -90,6 +122,11 @@ def mk_and(*fs: Formula) -> Formula:
 
 
 def mk_or(*fs: Formula) -> Formula:
+    """Строит дизъюнкцию fs с упрощением констант.
+
+    False выбрасывается, True поглощает всю дизъюнкцию, вложенные "or"
+    сплющиваются. Пустая дизъюнкция — False, из одного операнда — сам операнд.
+    """
     operands: list[Formula] = []
     for f in fs:
         if f == FALSE:
@@ -108,6 +145,10 @@ def mk_or(*fs: Formula) -> Formula:
 
 
 def mk_implies(premise: Formula, conclusion: Formula) -> Formula:
+    """Строит premise => conclusion с упрощением констант.
+
+    True => Q = Q;  False => Q = True;  P => True = True;  P => False = not P.
+    """
     if premise == TRUE:
         return conclusion
     if premise == FALSE or conclusion == TRUE:
@@ -117,11 +158,12 @@ def mk_implies(premise: Formula, conclusion: Formula) -> Formula:
     return BoolOp(IMPLIES, [premise, conclusion])
 
 
-# ---------------------------------------------------------------------------
-# Свободные переменные
-# ---------------------------------------------------------------------------
-
 def free_vars_expr(e: Expr) -> set[str]:
+    """Возвращает имена переменных, входящих в выражение e.
+
+    Имя вызываемой функции (Call.function) переменной программы не считается,
+    учитываются только аргументы вызова.
+    """
     match e:
         case Variable(name):
             return {name}
@@ -132,7 +174,6 @@ def free_vars_expr(e: Expr) -> set[str]:
         case UnaryOp(_, operand):
             return free_vars_expr(operand)
         case Call(_, args):
-            # Имя функции — не переменная программы.
             return _union(free_vars_expr(a) for a in args)
         case Attribute(obj, _):
             return free_vars_expr(obj)
@@ -140,6 +181,10 @@ def free_vars_expr(e: Expr) -> set[str]:
 
 
 def free_vars(f: Formula) -> set[str]:
+    """Возвращает имена свободных переменных формулы f.
+
+    Переменные, связанные квантором, внутри его тела свободными не считаются.
+    """
     match f:
         case Comparison(_, left, right):
             return free_vars_expr(left) | free_vars_expr(right)
@@ -155,17 +200,19 @@ def free_vars(f: Formula) -> set[str]:
 
 
 def _union(sets: Iterable[set[str]]) -> set[str]:
+    """Объединение произвольного числа множеств."""
     result: set[str] = set()
     for s in sets:
         result |= s
     return result
 
 
-# ---------------------------------------------------------------------------
-# Подстановка Q[e/x] (одновременная, без захвата переменных)
-# ---------------------------------------------------------------------------
-
 def substitute_expr(e: Expr, mapping: Mapping[str, Expr]) -> Expr:
+    """Одновременно заменяет в выражении e переменные из mapping.
+
+    В выражениях нет связывающих конструкций, поэтому захват невозможен.
+    Имя вызываемой функции не заменяется, только аргументы вызова.
+    """
     match e:
         case Variable(name):
             return mapping.get(name, e)
@@ -183,9 +230,13 @@ def substitute_expr(e: Expr, mapping: Mapping[str, Expr]) -> Expr:
 
 
 def substitute(f: Formula, mapping: Mapping[str, Expr]) -> Formula:
-    """Одновременно заменяет свободные вхождения переменных mapping.keys()
-    на соответствующие выражения. Связанные переменные кванторов, которые
-    попали бы под захват, переименовываются в свежие."""
+    """Подстановка Q[e/x] без захвата переменных.
+
+    Одновременно заменяет свободные вхождения переменных mapping.keys()
+    на соответствующие выражения: substitute(x == y, {x: y, y: x}) = (y == x).
+    Связанные переменные кванторов, которые попали бы под захват,
+    переименовываются в свежие (d -> d_1).
+    """
     if not mapping:
         return f
     match f:
@@ -205,8 +256,15 @@ def substitute(f: Formula, mapping: Mapping[str, Expr]) -> Formula:
 def _substitute_quantifier(
     kind: str, variables: list[str], body: Formula, mapping: Mapping[str, Expr]
 ) -> Formula:
+    """Подстановка внутрь квантора kind variables. body.
+
+    1. Из mapping убираются связанные переменные (их вхождения не свободны)
+       и переменные, которых нет в теле.
+    2. Связанные переменные, которые входят в подставляемые выражения,
+       переименовываются в свежие — иначе они бы их захватили.
+    3. Оставшаяся подстановка применяется к переименованному телу.
+    """
     body_free = free_vars(body)
-    # Связанные переменные не заменяются, лишние пары выбрасываем.
     active = {
         name: e for name, e in mapping.items()
         if name not in variables and name in body_free
@@ -232,6 +290,7 @@ def _substitute_quantifier(
 
 
 def _fresh_name(base: str, used: set[str]) -> str:
+    """Первое имя вида base_1, base_2, ..., которого нет в used."""
     i = 1
     while f"{base}_{i}" in used:
         i += 1
@@ -249,7 +308,17 @@ def wp(
     postcondition        — Q, должно выполняться при нормальном завершении.
     return_postcondition — R, должно выполняться в момент return
                            (обычно конъюнкция ensures). По умолчанию = Q.
-    on_loop              — колбэк для сбора VC циклов (см. LoopCallback).
+    on_loop              — вызывается для каждого встреченного цикла как
+                           on_loop(loop, post, return_post):
+                             post        — что должно выполняться после выхода
+                                           из цикла;
+                             return_post — постусловие для return внутри тела.
+                           Роль 4 по этим данным строит VC цикла:
+                             I and not b => post,  I and b => wp(body, I).
+
+    command может быть командой или списком команд (пустой список — skip).
+    Для цикла возвращается его инвариант I.
+    Бросает WPError на неподдерживаемых командах.
     """
     ret = postcondition if return_postcondition is None else return_postcondition
     return _wp(command, postcondition, ret, on_loop)
@@ -261,14 +330,18 @@ def _wp(
     ret: Formula,
     on_loop: LoopCallback | None,
 ) -> Formula:
+    """Рекурсивное вычисление wp с двумя постусловиями.
+
+    post — постусловие нормального завершения, ret — постусловие return.
+    Последовательность сворачивается справа налево. Для return post
+    игнорируется: команды после него недостижимы.
+    """
     if isinstance(command, (list, tuple)):
         for c in reversed(command):
             post = _wp(c, post, ret, on_loop)
         return post
 
     match command:
-        case Skip():
-            return post
         case Assign(Variable(name), value):
             return substitute(post, {name: value})
         case Assign(target, _):
