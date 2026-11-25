@@ -48,7 +48,7 @@ from core.classes import (
     Comparison,
     Constant,
     Expr,
-    Formula as BaseFormula,
+    Formula,
     If,
     Not,
     Return,
